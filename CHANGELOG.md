@@ -2,6 +2,8 @@
 - Added Phase 3: Diff Analysis
     - Feature comparison with target branch
     - by default compares with staging branch
+    - rea diff == default cmd{diff with branch name 'staging'}
+    - rea diff <branch_name> == cmd{diff with branch name <branch_name>}
 
 ## 0.0.3
 - Added Phase 2: Metrics Calculation
