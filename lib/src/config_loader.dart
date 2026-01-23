@@ -45,10 +45,18 @@ class ConfigLoader {
         line = line.trim();
         if (line.isEmpty || line.startsWith('#')) continue;
 
-        if (line.contains(':')) {
-          final parts = line.split(':');
-          final key = parts[0].trim();
-          final value = parts.length > 1 ? parts[1].trim() : '';
+        // Check for list items FIRST (before checking for ':')
+        if (line.startsWith('-') && currentList != null) {
+          // List item
+          final item = line.substring(1).trim();
+          currentList.add(item);
+        } else if (line.contains(':')) {
+          // Use indexOf to find first colon, then substring to preserve additional colons
+          final colonIndex = line.indexOf(':');
+          final key = line.substring(0, colonIndex).trim();
+          final value = colonIndex + 1 < line.length
+              ? line.substring(colonIndex + 1).trim()
+              : '';
 
           if (value.isEmpty) {
             // Start of a list
@@ -70,10 +78,6 @@ class ConfigLoader {
               map[key] = value;
             }
           }
-        } else if (line.startsWith('-') && currentList != null) {
-          // List item
-          final item = line.substring(1).trim();
-          currentList.add(item);
         }
       }
 

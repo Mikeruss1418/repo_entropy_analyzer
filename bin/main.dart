@@ -5,17 +5,12 @@ import 'package:repo_analyzer/rea.dart';
 Future<void> main(List<String> arguments) async {
   // Detect command BEFORE parsing
   String? command;
-  List<String> commandArgs = [];
   List<String> parserArgs = arguments;
 
   if (arguments.isNotEmpty && arguments.first == 'diff') {
     command = 'diff';
-    // Remove 'diff' and extract target branch if provided
-    parserArgs = arguments.skip(1).where((arg) => arg.startsWith('-')).toList();
-    commandArgs = arguments
-        .skip(1)
-        .where((arg) => !arg.startsWith('-'))
-        .toList();
+    // Pass all arguments after 'diff' to the parser (preserves option values)
+    parserArgs = arguments.skip(1).toList();
   }
 
   final parser = ArgParser()
@@ -139,7 +134,10 @@ Future<void> main(List<String> arguments) async {
 
   if (command == 'diff') {
     // --- DIFF COMMAND EXECUTION ---
-    final targetBranch = commandArgs.isNotEmpty ? commandArgs.first : 'staging';
+    // Get target branch from remaining args (after flags are parsed)
+    final targetBranch = argResults.rest.isNotEmpty
+        ? argResults.rest.first
+        : 'main';
     print('Comparing current work against "$targetBranch"...');
 
     // 1. Get changed files
