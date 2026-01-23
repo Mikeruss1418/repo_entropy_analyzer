@@ -137,7 +137,7 @@ Future<void> main(List<String> arguments) async {
     // Get target branch from remaining args (after flags are parsed)
     final targetBranch = argResults.rest.isNotEmpty
         ? argResults.rest.first
-        : 'main';
+        : 'staging';
     print('Comparing current work against "$targetBranch"...');
 
     // 1. Get changed files
