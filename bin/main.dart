@@ -3,6 +3,21 @@ import 'package:args/args.dart';
 import 'package:repo_analyzer/rea.dart';
 
 Future<void> main(List<String> arguments) async {
+  // Detect command BEFORE parsing
+  String? command;
+  List<String> commandArgs = [];
+  List<String> parserArgs = arguments;
+
+  if (arguments.isNotEmpty && arguments.first == 'diff') {
+    command = 'diff';
+    // Remove 'diff' and extract target branch if provided
+    parserArgs = arguments.skip(1).where((arg) => arg.startsWith('-')).toList();
+    commandArgs = arguments
+        .skip(1)
+        .where((arg) => !arg.startsWith('-'))
+        .toList();
+  }
+
   final parser = ArgParser()
     ..addOption(
       'last',
@@ -37,10 +52,11 @@ Future<void> main(List<String> arguments) async {
 
   ArgResults argResults;
   try {
-    argResults = parser.parse(arguments);
+    argResults = parser.parse(parserArgs);
   } catch (e) {
     print('Error: ${e.toString()}');
     print('Usage: rea [options] [path]');
+    print('       rea diff [target_branch] [options]');
     print(parser.usage);
     exit(1);
   }
@@ -48,6 +64,7 @@ Future<void> main(List<String> arguments) async {
   if (argResults['help'] as bool) {
     print('Repo Entropy Analyzer (REA)');
     print('Usage: rea [options] [path]');
+    print('       rea diff [target_branch] [options]');
     print(parser.usage);
     exit(0);
   }
@@ -59,7 +76,7 @@ Future<void> main(List<String> arguments) async {
 
   // Determine repository path
   String path = '.';
-  if (argResults.rest.isNotEmpty) {
+  if (command == null && argResults.rest.isNotEmpty) {
     path = argResults.rest.first;
   }
 
@@ -84,83 +101,155 @@ Future<void> main(List<String> arguments) async {
     exit(1);
   }
 
-  // Phase 1: Data Extraction
-  try {
-    print('Analyzing last $lastCommits commits in $gitRoot...');
+  if (command == 'diff') {
+    // --- DIFF COMMAND EXECUTION ---
+    final targetBranch = commandArgs.isNotEmpty ? commandArgs.first : 'staging';
+    print('Comparing current work against "$targetBranch"...');
 
-    final logRaw = await gitService.getRawLog(gitRoot, lastCommits);
-    final fileHistories = analyzer.analyze(logRaw);
-
-    // Phase 2: Metrics Calculation
-    final riskReports = metricsEngine.calculateRisk(fileHistories);
-
-    print('Analyzed ${fileHistories.length} files.');
-    print('');
-    print('Top $topCount High-Risk Files:');
-    print('--------------------------------------------------');
-
-    // Header
-    var header =
-        '${padRight('File', 40)}${padRight('Score', 10)}${padRight('Risk', 10)}${padRight('Changes', 10)}';
-    if (showAuthors) header += padRight('Authors', 10);
-    if (showWeighted) header += '  (Details)';
-    print(header);
-
-    print('--------------------------------------------------');
-
-    for (var report in riskReports.take(topCount)) {
-      final history = fileHistories.firstWhere(
-        (h) => h.path == report.filePath,
-      );
-
-      var line =
-          '${padRight(truncate(report.filePath, 38), 40)}${padRight(report.score.toString(), 10)}${padRight(report.riskLevel, 10)}${padRight(history.changeCount.toString(), 10)}';
-
-      if (showAuthors) {
-        final uniqueAuthors = history.commits
-            .map((c) => c.authorEmail)
-            .toSet()
-            .length;
-        line += padRight(uniqueAuthors.toString(), 10);
+    // 1. Get changed files
+    List<String> changedFiles;
+    try {
+      changedFiles = await gitService.getChangedFiles(gitRoot, targetBranch);
+      if (changedFiles.isEmpty) {
+        print('No changes detected against $targetBranch.');
+        exit(0);
       }
-
-      if (showWeighted) {
-        // 1. Raw Change Count (Base Score)
-        double score = (history.changeCount * 2).clamp(0, 50).toDouble();
-
-        // 2. Temporal Decay (Recency)
-        double recencyScore = 0.0;
-        final now = DateTime.now();
-        for (var commit in history.commits) {
-          final daysAgo = now.difference(commit.date).inDays;
-          if (daysAgo <= 7) {
-            recencyScore += 3.0; // High impact
-          } else if (daysAgo <= 30) {
-            recencyScore += 1.0; // Medium impact
-          } else {
-            recencyScore += 0.1; // Low impact
-          }
-        }
-        recencyScore = recencyScore.clamp(0, 30);
-
-        // 3. Bus Factor
-        int busScore = 0;
-        final uniqueAuthors = history.commits.map((c) => c.authorEmail).toSet();
-        if (uniqueAuthors.length > 3) {
-          busScore = 20;
-        } else if (uniqueAuthors.length > 1) {
-          busScore = 5;
-        }
-
-        line +=
-            '  (Base:${score.toInt()} + Recency:${recencyScore.toInt()} + Bus:$busScore)';
-      }
-
-      print(line);
+      print('Detected ${changedFiles.length} modified files.');
+    } catch (e) {
+      print('Error getting diff: $e');
+      exit(1);
     }
-  } catch (e) {
-    print('Error analyzing repository: $e');
-    exit(1);
+
+    // 2. Run Analysis to get Risk Scores
+    try {
+      final logRaw = await gitService.getRawLog(gitRoot, lastCommits);
+      final fileHistories = analyzer.analyze(logRaw);
+      final riskReports = metricsEngine.calculateRisk(fileHistories);
+
+      // 3. Filter reports for changed files
+      final dangerousChanges = riskReports
+          .where((r) => changedFiles.contains(r.filePath))
+          .toList();
+
+      if (dangerousChanges.isEmpty) {
+        print('✓ Safe! You are modifying files with low/no recent churn.');
+      } else {
+        print('');
+        print('⚠️  SAFETY WARNING ⚠️');
+        print('You are modifying High-Entropy files. Proceed with caution!');
+        print('');
+
+        var header =
+            '${padRight('File', 40)}${padRight('Score', 10)}${padRight('Risk', 10)}${padRight('Changes', 10)}';
+        print(header);
+        print('--------------------------------------------------');
+
+        bool criticalFound = false;
+
+        for (var report in dangerousChanges) {
+          final history = fileHistories.firstWhere(
+            (h) => h.path == report.filePath,
+          );
+          var line =
+              '${padRight(truncate(report.filePath, 38), 40)}${padRight(report.score.toString(), 10)}${padRight(report.riskLevel, 10)}${padRight(history.changeCount.toString(), 10)}';
+          print(line);
+
+          if (report.score >= 80) criticalFound = true;
+        }
+
+        if (criticalFound) {
+          print('');
+          print('🛑 STOP! You are modifying CRITICAL Hotspots (>80 score).');
+          print(
+            'Double-check your logic and ensure tests cover these changes.',
+          );
+        }
+      }
+    } catch (e) {
+      print('Error analyzing risk: $e');
+      exit(1);
+    }
+  } else {
+    // --- STANDARD ANALYSIS ---
+    try {
+      print('Analyzing last $lastCommits commits in $gitRoot...');
+
+      final logRaw = await gitService.getRawLog(gitRoot, lastCommits);
+      final fileHistories = analyzer.analyze(logRaw);
+
+      // Phase 2: Metrics Calculation
+      final riskReports = metricsEngine.calculateRisk(fileHistories);
+
+      print('Analyzed ${fileHistories.length} files.');
+      print('');
+      print('Top $topCount High-Risk Files:');
+      print('--------------------------------------------------');
+
+      // Header
+      var header =
+          '${padRight('File', 40)}${padRight('Score', 10)}${padRight('Risk', 10)}${padRight('Changes', 10)}';
+      if (showAuthors) header += padRight('Authors', 10);
+      if (showWeighted) header += '  (Details)';
+      print(header);
+
+      print('--------------------------------------------------');
+
+      for (var report in riskReports.take(topCount)) {
+        final history = fileHistories.firstWhere(
+          (h) => h.path == report.filePath,
+        );
+
+        var line =
+            '${padRight(truncate(report.filePath, 38), 40)}${padRight(report.score.toString(), 10)}${padRight(report.riskLevel, 10)}${padRight(history.changeCount.toString(), 10)}';
+
+        if (showAuthors) {
+          final uniqueAuthors = history.commits
+              .map((c) => c.authorEmail)
+              .toSet()
+              .length;
+          line += padRight(uniqueAuthors.toString(), 10);
+        }
+
+        if (showWeighted) {
+          // 1. Raw Change Count (Base Score)
+          double score = (history.changeCount * 2).clamp(0, 50).toDouble();
+
+          // 2. Temporal Decay (Recency)
+          double recencyScore = 0.0;
+          final now = DateTime.now();
+          for (var commit in history.commits) {
+            final daysAgo = now.difference(commit.date).inDays;
+            if (daysAgo <= 7) {
+              recencyScore += 3.0; // High impact
+            } else if (daysAgo <= 30) {
+              recencyScore += 1.0; // Medium impact
+            } else {
+              recencyScore += 0.1; // Low impact
+            }
+          }
+          recencyScore = recencyScore.clamp(0, 30);
+
+          // 3. Bus Factor
+          int busScore = 0;
+          final uniqueAuthors = history.commits
+              .map((c) => c.authorEmail)
+              .toSet();
+          if (uniqueAuthors.length > 3) {
+            busScore = 20;
+          } else if (uniqueAuthors.length > 1) {
+            busScore = 5;
+          }
+
+          line +=
+              '  (Base:${score.toInt()} + Recency:${recencyScore.toInt()} + Bus:$busScore)';
+        }
+
+        print(line);
+      }
+    } catch (e) {
+      print('Error analyzing repository: $e');
+      exit(1);
+    }
   }
 }
 
