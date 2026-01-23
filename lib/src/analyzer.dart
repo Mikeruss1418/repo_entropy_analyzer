@@ -1,33 +1,35 @@
+import 'metrics_engine.dart';
+
 class Analyzer {
-  /// Parses the git log output and returns file changes count.
-  Map<String, int> analyze(String logOutput) {
-    final fileCounts = <String, int>{};
+  /// Parses the git log output and returns structured file history.
+  List<FileHistory> analyze(String logOutput) {
+    final fileCommits = <String, List<CommitInfo>>{};
+
     final lines = logOutput.split('\n');
+    CommitInfo? currentCommit;
 
     for (var line in lines) {
-      // Basic heuristic: lines starting with space and containing "|" are likely stats
-      // Example: " lib/main.dart | 10 +++++++++-"
-      // We want to skip:
-      // - Commit headers (commit xyz, Author: ..., Date: ...)
-      // - Empty lines
-      // - Summary lines " 3 files changed, 20 insertions(+)..."
+      line = line.trim();
+      if (line.isEmpty) continue;
 
-      if (line.trim().isEmpty) continue;
-
-      // Git log --stat lines usually look like " path/to/file | N +-"
-      // But verify it has a pipe, and doesn't look like a summary line
-      if (line.contains('|') && !line.contains('files changed')) {
+      if (line.startsWith('COMMIT_START|')) {
+        // Parse Header: COMMIT_START|email|date
         final parts = line.split('|');
-        if (parts.length >= 2) {
-          final path = parts[0].trim();
-
-          // Basic validation to assume it is a file path
-          if (path.isNotEmpty) {
-            fileCounts[path] = (fileCounts[path] ?? 0) + 1;
-          }
+        if (parts.length >= 3) {
+          final email = parts[1];
+          final dateStr = parts[2];
+          final date = DateTime.tryParse(dateStr) ?? DateTime.now();
+          currentCommit = CommitInfo(email, date);
+        }
+      } else {
+        // It's a file path
+        if (currentCommit != null) {
+          final path = line;
+          fileCommits.putIfAbsent(path, () => []).add(currentCommit);
         }
       }
     }
-    return fileCounts;
+
+    return fileCommits.entries.map((e) => FileHistory(e.key, e.value)).toList();
   }
 }
