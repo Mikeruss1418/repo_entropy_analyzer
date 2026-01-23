@@ -48,7 +48,20 @@ Future<void> main(List<String> arguments) async {
       negatable: false,
       help: 'Show weighted score breakdown',
     )
-    ..addFlag('authors', negatable: false, help: 'Show author statistics');
+    ..addFlag('authors', negatable: false, help: 'Show author statistics')
+    ..addFlag(
+      'no-filter',
+      negatable: false,
+      help: 'Disable filtering of generated files',
+    )
+    ..addFlag('heatmap', negatable: false, help: 'Show ASCII heatmap bars')
+    ..addFlag('trend', negatable: false, help: 'Show stability trend indicator')
+    ..addFlag('color', defaultsTo: true, help: 'Enable colored output')
+    ..addFlag(
+      'verbose',
+      negatable: false,
+      help: 'Analyze all commits and show all files',
+    );
 
   ArgResults argResults;
   try {
@@ -80,14 +93,24 @@ Future<void> main(List<String> arguments) async {
     path = argResults.rest.first;
   }
 
-  final int lastCommits = int.tryParse(argResults['last'] as String) ?? 50;
-  final int topCount = int.tryParse(argResults['top'] as String) ?? 10;
+  final bool verbose = argResults['verbose'] as bool;
+
+  // If verbose, analyze all commits and show all files
+  final int lastCommits = verbose
+      ? 999999 // Effectively "all" commits
+      : (int.tryParse(argResults['last'] as String) ?? 50);
+  final int topCount = verbose
+      ? 999999 // Show all files
+      : (int.tryParse(argResults['top'] as String) ?? 10);
+
   final bool showWeighted = argResults['weighted'] as bool;
   final bool showAuthors = argResults['authors'] as bool;
+  final bool noFilter = argResults['no-filter'] as bool;
+  final bool showHeatmap = argResults['heatmap'] as bool;
+  final bool showTrend = argResults['trend'] as bool;
+  final bool enableColor = argResults['color'] as bool;
 
   final gitService = GitService();
-  final analyzer = Analyzer();
-  final metricsEngine = MetricsEngine();
 
   // Phase 0: Validation
   if (!await gitService.checkGitInstalled()) {
@@ -100,6 +123,19 @@ Future<void> main(List<String> arguments) async {
     print("Error: The directory '$path' is not a git repository.");
     exit(1);
   }
+
+  // Load config
+  Visualizer.showProgress('Loading configuration');
+  final config = await ConfigLoader.loadConfig(gitRoot);
+
+  // Create filter service
+  final filterService = FilterService(
+    enableFiltering: !noFilter,
+    customIgnorePatterns: config?.ignorePatterns ?? [],
+  );
+
+  final analyzer = Analyzer(filterService: filterService);
+  final metricsEngine = MetricsEngine();
 
   if (command == 'diff') {
     // --- DIFF COMMAND EXECUTION ---
@@ -181,6 +217,32 @@ Future<void> main(List<String> arguments) async {
       final riskReports = metricsEngine.calculateRisk(fileHistories);
 
       print('Analyzed ${fileHistories.length} files.');
+
+      // Calculate stability trend if requested
+      if (showTrend && lastCommits >= 50) {
+        try {
+          // Get previous period for comparison
+          final prevLogRaw = await gitService.getRawLog(
+            gitRoot,
+            lastCommits * 2,
+          );
+          final prevHistories = analyzer.analyze(prevLogRaw);
+          final prevReports = metricsEngine.calculateRisk(prevHistories);
+
+          // Create score maps
+          final recentScores = {for (var r in riskReports) r.filePath: r.score};
+          final prevScores = {for (var r in prevReports) r.filePath: r.score};
+
+          final trend = Visualizer.calculateStabilityTrend(
+            recentScores,
+            prevScores,
+          );
+          print('Stability Trend: $trend');
+        } catch (e) {
+          // Trend calculation failed, continue without it
+        }
+      }
+
       print('');
       print('Top $topCount High-Risk Files:');
       print('--------------------------------------------------');
@@ -188,6 +250,7 @@ Future<void> main(List<String> arguments) async {
       // Header
       var header =
           '${padRight('File', 40)}${padRight('Score', 10)}${padRight('Risk', 10)}${padRight('Changes', 10)}';
+      if (showHeatmap) header += padRight('Heatmap', 25);
       if (showAuthors) header += padRight('Authors', 10);
       if (showWeighted) header += '  (Details)';
       print(header);
@@ -199,8 +262,19 @@ Future<void> main(List<String> arguments) async {
           (h) => h.path == report.filePath,
         );
 
+        final scoreStr = enableColor
+            ? Visualizer.colorizeScore(report.score)
+            : report.score.toString();
+        final riskStr = enableColor
+            ? Visualizer.colorizeRisk(report.riskLevel)
+            : report.riskLevel;
+
         var line =
-            '${padRight(truncate(report.filePath, 38), 40)}${padRight(report.score.toString(), 10)}${padRight(report.riskLevel, 10)}${padRight(history.changeCount.toString(), 10)}';
+            '${padRight(truncate(report.filePath, 38), 40)}${padRight(scoreStr, 10)}${padRight(riskStr, 10)}${padRight(history.changeCount.toString(), 10)}';
+
+        if (showHeatmap) {
+          line += padRight(Visualizer.generateHeatBar(report.score), 25);
+        }
 
         if (showAuthors) {
           final uniqueAuthors = history.commits
@@ -255,7 +329,12 @@ Future<void> main(List<String> arguments) async {
 
 // used just for providing padding between each column
 String padRight(String s, int width) {
-  return s.padRight(width);
+  // Remove ANSI color codes for length calculation
+  final stripped = s.replaceAll(RegExp(r'\x1B\[[0-9;]*m'), '');
+  final padding = width - stripped.length;
+
+  if (padding <= 0) return s;
+  return s + (' ' * padding);
 }
 
 String truncate(String s, int max) {

@@ -1,6 +1,11 @@
 import 'metrics_engine.dart';
+import 'filter_service.dart';
 
 class Analyzer {
+  final FilterService? filterService;
+
+  Analyzer({this.filterService});
+
   /// Parses the git log output and returns structured file history.
   List<FileHistory> analyze(String logOutput) {
     final fileCommits = <String, List<CommitInfo>>{};
@@ -25,6 +30,12 @@ class Analyzer {
         // It's a file path
         if (currentCommit != null) {
           final path = line;
+
+          // Apply filtering
+          if (filterService != null && filterService!.shouldIgnoreFile(path)) {
+            continue; // Skip this file
+          }
+
           fileCommits.putIfAbsent(path, () => []).add(currentCommit);
         }
       }
