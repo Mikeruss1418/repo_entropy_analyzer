@@ -34,6 +34,49 @@ class GitService {
     }
   }
 
+  /// Retrieves the current branch name.
+  Future<String> getCurrentBranch(String path) async {
+    try {
+      final result = await runExecutableArguments('git', [
+        'rev-parse',
+        '--abbrev-ref',
+        'HEAD',
+      ], workingDirectory: path);
+      return result.stdout.toString().trim();
+    } catch (e) {
+      throw Exception('Failed to get current branch: $e');
+    }
+  }
+
+  /// Retrieves files changed between HEAD and the target branch.
+  /// Also includes uncommitted changes if local changes exist.
+  Future<List<String>> getChangedFiles(String path, String target) async {
+    try {
+      // 1. Files changed in commits between target..HEAD
+      // 2. Files changed in working directory (uncommitted)
+      // "git diff --name-only <target>" covers both if we are on HEAD.
+
+      final result = await runExecutableArguments('git', [
+        'diff',
+        '--name-only',
+        target,
+      ], workingDirectory: path);
+
+      if (result.exitCode != 0) {
+        throw Exception('Git diff failed: ${result.stderr}');
+      }
+
+      return result.stdout
+          .toString()
+          .split('\n')
+          .map((l) => l.trim())
+          .where((l) => l.isNotEmpty)
+          .toList();
+    } catch (e) {
+      throw Exception('Failed to get diff: $e');
+    }
+  }
+
   /// Retrieves the git log with author and date info.
   Future<String> getRawLog(String path, int limit) async {
     try {
