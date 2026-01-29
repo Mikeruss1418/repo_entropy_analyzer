@@ -177,10 +177,10 @@ class AnalyzeCommand extends Command<int> {
       logger.info('--------------------------------------------------');
 
       var header =
-          '${padRight('File', 40)}${padRight('Score', 10)}${padRight('Risk', 10)}${padRight('Changes', 10)}';
-      if (showHeatmap) header += padRight('Heatmap', 25);
+          '${padRight('File', 40)}${padRight('Score', 10)}${padRight('Risk', 10)}${padRight('Changes', 20)}';
+      if (showHeatmap) header += padRight('Heatmap', 35);
       if (showAuthors) header += padRight('Authors', 10);
-      if (showWeighted) header += '  (Details)';
+      if (showWeighted) header += padLeft("Weight", 20);
       logger.info(header);
       logger.info('--------------------------------------------------');
 
@@ -284,10 +284,10 @@ class AnalyzeCommand extends Command<int> {
     final riskStr = _colorizeRisk(report.riskLevel);
 
     var line =
-        '${padRight(truncate(report.filePath, 38), 40)}${padRight(scoreStr, 10 + (scoreStr.length - report.score.toString().length))}${padRight(riskStr, 10 + (riskStr.length - report.riskLevel.length))}${padRight(history.changeCount.toString(), 10)}';
+        '${padRight(truncate(report.filePath, 38), 40)}${padRight(scoreStr, (scoreStr.length - report.score.toString().length))}${padRight(riskStr, 5 + (riskStr.length - report.riskLevel.length))}${padRight(history.changeCount.toString(), 10)}';
 
     if (showHeatmap) {
-      line += padRight(Visualizer.generateHeatBar(report.score), 25);
+      line += padRight(Visualizer.generateHeatBar(report.score), 45);
     }
 
     if (showAuthors) {
@@ -299,9 +299,11 @@ class AnalyzeCommand extends Command<int> {
     }
 
     if (showWeighted) {
-      // Recalculate component scores (duplicated logic from MetricsEngine, ideal refactor: move to RiskReport)
-      // For now, keep simple
-      line += '  (Details)';
+      final components = Visualizer.calculateWeightedComponents(
+        report,
+        history,
+      );
+      line += '  $components';
     }
     return line;
   }
@@ -373,6 +375,16 @@ class AnalyzeCommand extends Command<int> {
     final padding = width - stripped.length;
     if (padding <= 0) return s;
     return s + (' ' * padding);
+  }
+
+  String padLeft(String s, int width) {
+    // Quick and dirty pad, assuming no ansi codes in input s for length check unless handled
+    // But s might have ansi codes from colorize.
+    // We need to strip ansi for length calc.
+    final stripped = s.replaceAll(RegExp(r'\x1B\[[0-9;]*m'), '');
+    final padding = width - stripped.length;
+    if (padding <= 0) return s;
+    return (' ' * padding) + s;
   }
 
   String truncate(String s, int max) {

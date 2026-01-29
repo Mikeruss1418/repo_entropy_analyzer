@@ -1,3 +1,5 @@
+import 'package:repo_analyzer/rea.dart';
+
 class Visualizer {
   /// Generates an ASCII heatbar for a score (0-100)
   /// Example: [##########----------] 50%
@@ -27,9 +29,9 @@ class Visualizer {
 
     final diff = recentAvg - previousAvg;
 
-    if (diff > 5) return '↑'; // Getting worse
-    if (diff < -5) return '↓'; // Getting better
-    return '→'; // Stable
+    if (diff > 5) return 'Volatile ↑'; // Getting worse
+    if (diff < -5) return 'Getting Better ↓'; // Getting better
+    return 'Stable →'; // Stable
   }
 
   /// Simple progress indicator
@@ -60,5 +62,41 @@ class Visualizer {
     if (score >= 60) return '\x1B[33m$score\x1B[0m'; // Yellow
     if (score >= 40) return '\x1B[36m$score\x1B[0m'; // Cyan
     return '\x1B[32m$score\x1B[0m'; // Green
+  }
+
+  /// Calculate weighted components for display
+  static String calculateWeightedComponents(
+    RiskReport report,
+    FileHistory history,
+  ) {
+    // Calculate individual component scores
+    // These weights should match what MetricsEngine uses
+    final changeFrequency = (history.changeCount * 0.4).toInt();
+
+    final uniqueAuthors = history.commits
+        .map((c) => c.authorEmail)
+        .toSet()
+        .length;
+    final authorComplexity = (uniqueAuthors * 0.3).toInt();
+
+    // Calculate recency score (more recent changes = higher score)
+    int recencyScore = 0;
+    if (history.commits.isNotEmpty) {
+      final latestCommit = history.commits.first.date;
+      final now = DateTime.now();
+      final daysSinceLastChange = now.difference(latestCommit).inDays;
+
+      if (daysSinceLastChange < 7) {
+        recencyScore = 30;
+      } else if (daysSinceLastChange < 30) {
+        recencyScore = 20;
+      } else if (daysSinceLastChange < 90) {
+        recencyScore = 10;
+      } else {
+        recencyScore = 5;
+      }
+    }
+
+    return 'Freq:$changeFrequency   Auth:$authorComplexity    Rec:$recencyScore';
   }
 }
