@@ -21,6 +21,7 @@ You can activate the package globally to use the `rea` command anywhere:
 dart pub global activate --source path .
 # Then run:
 rea --help
+# Discalimer after making the changes, Delete the .dart_tool and activate it again
 ```
 
 ### Local Usage
