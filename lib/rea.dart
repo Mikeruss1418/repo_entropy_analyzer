@@ -4,3 +4,5 @@ export 'src/metrics_engine.dart';
 export 'src/filter_service.dart';
 export 'src/visualizer.dart';
 export 'src/config_loader.dart';
+export 'src/insights_engine.dart';
+export 'src/exporter.dart';

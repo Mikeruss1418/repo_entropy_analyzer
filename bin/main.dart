@@ -56,6 +56,22 @@ Future<void> main(List<String> arguments) async {
       'verbose',
       negatable: false,
       help: 'Analyze all commits and show all files',
+    )
+    ..addFlag(
+      'insights',
+      negatable: false,
+      help: 'Show co-change patterns and knowledge silos',
+    )
+    ..addOption(
+      'export',
+      allowed: ['html', 'json', 'both'],
+      help: 'Export report (html, json, or both)',
+    )
+    ..addOption(
+      'output',
+      abbr: 'o',
+      defaultsTo: 'rea_report',
+      help: 'Output file path (without extension)',
     );
 
   ArgResults argResults;
@@ -104,6 +120,9 @@ Future<void> main(List<String> arguments) async {
   final bool showHeatmap = argResults['heatmap'] as bool;
   final bool showTrend = argResults['trend'] as bool;
   final bool enableColor = argResults['color'] as bool;
+  final bool showInsights = argResults['insights'] as bool;
+  final String? exportFormat = argResults['export'] as String?;
+  final String outputPath = argResults['output'] as String;
 
   final gitService = GitService();
 
@@ -317,6 +336,80 @@ Future<void> main(List<String> arguments) async {
         }
 
         print(line);
+      }
+
+      // Phase 6: Deep Insights
+      if (showInsights) {
+        print('');
+        print('═══════════════════════════════════════════════════');
+        print('📊 DEEP INSIGHTS');
+        print('═══════════════════════════════════════════════════');
+
+        final insightsEngine = InsightsEngine();
+
+        // Co-Change Analysis
+        final coChangePatterns = insightsEngine.analyzeCoChange(fileHistories);
+        if (coChangePatterns.isNotEmpty) {
+          print('');
+          print('🔗 Co-Change Patterns (Files that change together):');
+          print('---------------------------------------------------');
+          for (var pattern in coChangePatterns.take(10)) {
+            final percentage = (pattern.coChangeRate * 100).toStringAsFixed(0);
+            print('  • ${truncate(pattern.file1, 35)}');
+            print('    ↔ ${truncate(pattern.file2, 35)}');
+            print(
+              '    Co-changed $percentage% of the time (${pattern.coChangeCount} times)',
+            );
+            print('');
+          }
+          if (coChangePatterns.length > 10) {
+            print('  ... and ${coChangePatterns.length - 10} more patterns');
+          }
+        } else {
+          print('');
+          print('✓ No significant co-change patterns detected.');
+        }
+
+        // Knowledge Silos
+        final knowledgeSilos = insightsEngine.findKnowledgeSilos(fileHistories);
+        if (knowledgeSilos.isNotEmpty) {
+          print('');
+          print('⚠️  Knowledge Silos (High bus factor risk):');
+          print('---------------------------------------------------');
+          for (var silo in knowledgeSilos.take(10)) {
+            print('  • ${truncate(silo.filePath, 40)}');
+            print(
+              '    ${silo.changeCount} changes by ONLY: ${silo.soleAuthor}',
+            );
+            print('    ⚠️  If this person leaves, knowledge is lost!');
+            print('');
+          }
+          if (knowledgeSilos.length > 10) {
+            print('  ... and ${knowledgeSilos.length - 10} more silos');
+          }
+        } else {
+          print('');
+          print('✓ No knowledge silos detected.');
+        }
+        print('═══════════════════════════════════════════════════');
+      }
+
+      // Phase 7: Export
+      if (exportFormat != null) {
+        print('');
+        print('Generating export(s)...');
+
+        if (exportFormat == 'html' || exportFormat == 'both') {
+          final htmlPath = '$outputPath.html';
+          await Exporter.generateHtml(riskReports, fileHistories, htmlPath);
+          print('✓ HTML report saved to: $htmlPath');
+        }
+
+        if (exportFormat == 'json' || exportFormat == 'both') {
+          final jsonPath = '$outputPath.json';
+          await Exporter.generateJson(riskReports, fileHistories, jsonPath);
+          print('✓ JSON report saved to: $jsonPath');
+        }
       }
     } catch (e) {
       print('Error analyzing repository: $e');
