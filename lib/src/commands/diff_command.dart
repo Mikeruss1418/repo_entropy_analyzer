@@ -90,6 +90,7 @@ class DiffCommand extends Command<int> {
             '${padRight('File', 40)}${padRight('Score', 10)}${padRight('Risk', 10)}${padRight('Changes', 10)}';
         logger.info(header);
         logger.info('--------------------------------------------------');
+        
 
         bool criticalFound = false;
         for (var report in dangerousChanges) {
