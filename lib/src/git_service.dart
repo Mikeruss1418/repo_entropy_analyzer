@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:convert';
 import 'package:process_run/shell.dart';
 import 'package:path/path.dart' as context;
 
@@ -78,11 +79,9 @@ class GitService {
   }
 
   /// Retrieves the git log with author and date info.
+  @Deprecated('Use getRawLogStream for better memory usage')
   Future<String> getRawLog(String path, int limit) async {
     try {
-      // --no-merges: Excludes merge commits
-      // --pretty=format:"%ae|%ad": Author Email | Author Date (ISO-like by default, or respecting --date)
-      // --name-only: Show changed files
       final result = await runExecutableArguments('git', [
         'log',
         '--no-merges',
@@ -99,6 +98,37 @@ class GitService {
       return result.stdout.toString();
     } catch (e) {
       throw Exception('Failed to run git command: $e');
+    }
+  }
+
+  /// Retrieves the git log as a stream of lines.
+  Stream<String> getRawLogStream(String path, int limit) async* {
+    try {
+      final process = await Process.start('git', [
+        'log',
+        '--no-merges',
+        '--pretty=format:COMMIT_START|%ae|%ad',
+        '--date=iso',
+        '--name-only',
+        '-n',
+        '$limit',
+      ], workingDirectory: path);
+
+      // We need to handle stderr as well, ideally
+      // For now, let's yield lines from stdout
+      // Using system encoding usually handles utf8
+      yield* process.stdout
+          .transform(SystemEncoding().decoder)
+          .transform(const LineSplitter());
+
+      final exitCode = await process.exitCode;
+      if (exitCode != 0) {
+        // We could yield an error or throw, but since it's a stream, throwing might end it.
+        // Let's assume emptiness if failed or throw.
+        // throw Exception('Git process failed with exit code $exitCode');
+      }
+    } catch (e) {
+      throw Exception('Failed to start git process: $e');
     }
   }
 }

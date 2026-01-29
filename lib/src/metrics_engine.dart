@@ -81,4 +81,51 @@ class MetricsEngine {
     if (score >= 40) return 'MEDIUM';
     return 'LOW';
   }
+
+  /// Aggregates risk scores by directory
+  Map<String, int> calculateDirectoryRisk(List<RiskReport> reports) {
+    final dirScores = <String, List<int>>{};
+
+    for (var report in reports) {
+      final parts = report.filePath.split('/');
+      if (parts.length > 1) {
+        // Use first level directory or full path?
+        // Let's use first level top-level directories for high level view
+        // Or recursivley?
+        // Let's go with immediate parent directory of the file for granular heatmap,
+        // OR top-level folders.
+        // Requirement: "The auth/ module has a risk score of 80" suggests module based.
+        // Let's use the top-level directory (e.g. lib, bin, test, or src within lib)
+        // Adjust logic: if starts with lib/, take lib/src or lib/foo.
+
+        String dir = parts.first;
+        if (dir == 'lib' && parts.length > 2) {
+          dir = 'lib/${parts[1]}';
+        } else if (parts.length > 1) {
+          dir = parts.first; // e.g. bin
+        }
+
+        dirScores.putIfAbsent(dir, () => []).add(report.score);
+      } else {
+        dirScores.putIfAbsent('root', () => []).add(report.score);
+      }
+    }
+
+    final aggregated = <String, int>{};
+    dirScores.forEach((dir, scores) {
+      if (scores.isEmpty) return;
+      // Average score? Max score?
+      // Average might hide hotspots. Max warns about hotspots.
+      // Let's use Average for "Health" and Max for "Risk".
+      // Let's use Average.
+      final avg = scores.reduce((a, b) => a + b) / scores.length;
+      aggregated[dir] = avg.round();
+    });
+
+    // Sort by score desc
+    return Map.fromEntries(
+      aggregated.entries.toList()
+        ..sort((e1, e2) => e2.value.compareTo(e1.value)),
+    );
+  }
 }
